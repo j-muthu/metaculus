@@ -341,11 +341,13 @@ def update_timeseries(ma_window, start_date, end_date, firm, selected_parties):
     Input("corr-window", "value"),
 )
 def update_correlation(party_x, party_y, window):
-    # Use polls only (exclude elections)
+    # Use polls only (exclude elections); correlate first differences
+    # (poll-to-poll changes) to remove trend effects.
     corr_df = polls[PARTY_COLS].dropna(how="all")
+    diff_df = corr_df.diff().dropna(how="all")
 
     # --- Heatmap ---
-    corr_matrix = corr_df.corr(method="pearson")
+    corr_matrix = diff_df.corr(method="pearson")
     labels = [PARTY_LABELS[p] for p in PARTY_COLS]
     heatmap_fig = go.Figure(
         go.Heatmap(
@@ -362,29 +364,29 @@ def update_correlation(party_x, party_y, window):
         )
     )
     heatmap_fig.update_layout(
-        title="Pearson Correlation Matrix (Polls Only)",
+        title="Correlation of Polling Changes (Δ, Polls Only)",
         template="plotly_white",
         margin=dict(l=80, r=20, t=50, b=80),
     )
 
-    # --- Pairwise Scatter ---
-    pair_df = polls[[party_x, party_y]].dropna()
+    # --- Pairwise Scatter (first differences) ---
+    pair_diff = polls[[party_x, party_y]].diff().dropna()
     scatter_fig = go.Figure()
     scatter_fig.add_trace(
         go.Scatter(
-            x=pair_df[party_x],
-            y=pair_df[party_y],
+            x=pair_diff[party_x],
+            y=pair_diff[party_y],
             mode="markers",
             marker=dict(color=PARTY_COLORS[party_x], size=7, opacity=0.7),
             name="Polls",
-            hovertemplate=f"{PARTY_LABELS[party_x]}: %{{x:.1f}}%<br>{PARTY_LABELS[party_y]}: %{{y:.1f}}%<extra></extra>",
+            hovertemplate=f"Δ {PARTY_LABELS[party_x]}: %{{x:+.1f}} pp<br>Δ {PARTY_LABELS[party_y]}: %{{y:+.1f}} pp<extra></extra>",
         )
     )
 
     # Regression line
-    if len(pair_df) >= 2:
-        slope, intercept, r_value, p_value, std_err = stats.linregress(pair_df[party_x], pair_df[party_y])
-        x_range = np.linspace(pair_df[party_x].min(), pair_df[party_x].max(), 50)
+    if len(pair_diff) >= 2:
+        slope, intercept, r_value, p_value, std_err = stats.linregress(pair_diff[party_x], pair_diff[party_y])
+        x_range = np.linspace(pair_diff[party_x].min(), pair_diff[party_x].max(), 50)
         scatter_fig.add_trace(
             go.Scatter(
                 x=x_range,
@@ -396,15 +398,17 @@ def update_correlation(party_x, party_y, window):
         )
 
     scatter_fig.update_layout(
-        title=f"{PARTY_LABELS[party_x]} vs {PARTY_LABELS[party_y]}",
-        xaxis_title=f"{PARTY_LABELS[party_x]} (%)",
-        yaxis_title=f"{PARTY_LABELS[party_y]} (%)",
+        title=f"Δ {PARTY_LABELS[party_x]} vs Δ {PARTY_LABELS[party_y]} (Poll-to-Poll Changes)",
+        xaxis_title=f"Δ {PARTY_LABELS[party_x]} (pp)",
+        yaxis_title=f"Δ {PARTY_LABELS[party_y]} (pp)",
         template="plotly_white",
         margin=dict(l=60, r=20, t=50, b=60),
     )
 
-    # --- Rolling Correlation ---
+    # --- Rolling Correlation (of first differences) ---
     roll_df = polls[["fieldwork_end", party_x, party_y]].dropna().sort_values("fieldwork_end").reset_index(drop=True)
+    roll_df[[party_x, party_y]] = roll_df[[party_x, party_y]].diff()
+    roll_df = roll_df.dropna().reset_index(drop=True)
     rolling_fig = go.Figure()
 
     if len(roll_df) >= window:
@@ -423,7 +427,7 @@ def update_correlation(party_x, party_y, window):
         rolling_fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
 
     rolling_fig.update_layout(
-        title=f"Rolling Correlation: {PARTY_LABELS[party_x]} & {PARTY_LABELS[party_y]} (window={window})",
+        title=f"Rolling Correlation of Changes: Δ {PARTY_LABELS[party_x]} & Δ {PARTY_LABELS[party_y]} (window={window})",
         xaxis_title="Date",
         yaxis_title="Pearson r",
         yaxis=dict(range=[-1.05, 1.05]),
@@ -438,5 +442,8 @@ def update_correlation(party_x, party_y, window):
 # Run
 # ---------------------------------------------------------------------------
 
+server = app.server  # Expose for gunicorn
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    import os
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8050)), debug=False)
