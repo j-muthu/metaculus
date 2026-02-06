@@ -349,6 +349,24 @@ def update_correlation(party_x, party_y, window):
     # --- Heatmap ---
     corr_matrix = diff_df.corr(method="pearson")
     labels = [PARTY_LABELS[p] for p in PARTY_COLS]
+
+    # Build annotation text with significance stars
+    n_parties = len(PARTY_COLS)
+    annot_text = np.empty((n_parties, n_parties), dtype=object)
+    for i in range(n_parties):
+        for j in range(n_parties):
+            r_val = corr_matrix.values[i, j]
+            if i == j:
+                annot_text[i, j] = f"{r_val:.2f}"
+            else:
+                pair = diff_df[[PARTY_COLS[i], PARTY_COLS[j]]].dropna()
+                if len(pair) >= 3:
+                    _, p_val = stats.pearsonr(pair.iloc[:, 0], pair.iloc[:, 1])
+                    stars = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else ""
+                else:
+                    stars = ""
+                annot_text[i, j] = f"{r_val:.2f}{stars}"
+
     heatmap_fig = go.Figure(
         go.Heatmap(
             z=corr_matrix.values,
@@ -358,7 +376,7 @@ def update_correlation(party_x, party_y, window):
             zmid=0,
             zmin=-1,
             zmax=1,
-            text=np.round(corr_matrix.values, 2),
+            text=annot_text,
             texttemplate="%{text}",
             hovertemplate="(%{x}, %{y}): %{z:.2f}<extra></extra>",
         )
